@@ -1,6 +1,4 @@
 import time as t
-
-
 try:
     Number1 = int(input("First Number: "))
     Number2 = int(input("Second Number: "))
@@ -10,6 +8,8 @@ try:
         Result = Number1 + Number2
     elif char == "*":
         Result = Number1 * Number2
+    elif char == "**":
+        Result = Number1 ** Number2
     elif char == "/":
         Result = Number1 / Number2
     elif char == "-":
@@ -17,9 +17,10 @@ try:
     else:
         Result = "Invalid operator"
 
-    print (Result)
+    print ("Result is:", Result)
 except ValueError:
     print("Please write numbers")
 
 t.sleep(1.5)
 exit()
+
