@@ -8,7 +8,7 @@ char = (input("Character :"))
 if char == "*":
     Result = Number1 * Number2
 elif char == "+":
-     Result =  Number1 * Number2
+     Result =  Number1 + Number2
 elif char == "/":
     Result = Number1 / Number2
 
