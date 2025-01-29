@@ -82,6 +82,14 @@ class Calculator(QMainWindow):
         self.central_widget = QWidget(self)
         self.setCentralWidget(self.central_widget)
         
+        # Настройки по умолчанию
+        self.default_settings = {
+            'background_color': QColor("#34495E"),
+            'button_color': QColor("#3498DB"),
+            'enable_animations': True,
+            'animation_duration': 300
+        }
+
         # Основной лейаут
         self.layout = QVBoxLayout()
         self.central_widget.setLayout(self.layout)
@@ -124,14 +132,6 @@ class Calculator(QMainWindow):
             self.animate_button(button)
             self.button_grid.addWidget(button, row, col)
 
-        # Настройки по умолчанию
-        self.default_settings = {
-            'background_color': QColor("#34495E"),
-            'button_color': QColor("#3498DB"),
-            'enable_animations': True,
-            'animation_duration': 300
-        }
-
         # Создание диалогового окна настроек
         self.settings_dialog = SettingsDialog(self)
         self.settings_dialog.settings_changed.connect(self.apply_settings)
@@ -140,6 +140,26 @@ class Calculator(QMainWindow):
         self.settings_button = QPushButton("Настройки")
         self.settings_button.clicked.connect(self.show_settings)
         self.layout.addWidget(self.settings_button)
+
+        # Применение начальных настроек
+        self.apply_initial_settings()
+
+    def apply_initial_settings(self):
+        palette = QPalette()
+        palette.setColor(QPalette.Window, self.default_settings['background_color'])
+        self.setPalette(palette)
+        for btn in self.findChildren(QPushButton):
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    font-size: 24px;
+                    background-color: {self.default_settings['button_color'].name()};
+                    color: white;
+                    border-radius: 10px;
+                }}
+                QPushButton:pressed {{
+                    background-color: {self.default_settings['button_color'].darker(120).name()};
+                }}
+            """)
 
     def animate_button(self, button):
         if self.default_settings['enable_animations']:
