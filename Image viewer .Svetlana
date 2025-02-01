@@ -1,0 +1,87 @@
+import sys
+import numpy as np
+import pywt
+import lzma
+import cv2
+import pickle
+from PyQt5.QtWidgets import QApplication, QWidget, QPushButton, QLabel, QFileDialog, QVBoxLayout
+from PyQt5.QtGui import QPixmap, QImage
+from PyQt5.QtCore import Qt
+
+# === Функции декомпрессии ===
+def load_svetlana_file(file_path):
+    """Загружает данные из файла .svetlana."""
+    try:
+        with open(file_path, 'rb') as f:
+            compressed_data, coeffs_slices, shape, params = pickle.load(f)
+        return compressed_data, coeffs_slices, shape, params
+    except Exception as e:
+        raise ValueError(f"Ошибка при загрузке файла: {str(e)}")
+
+def custom_decompression(compressed_data, coeffs_slices, original_shape, params):
+    """Восстанавливает изображение из сжатых данных."""
+    try:
+        decompressed_data = np.frombuffer(lzma.decompress(compressed_data), dtype=np.float32)
+        split_size = original_shape[0] * original_shape[1]
+        coeffs_r = (decompressed_data[:split_size].reshape(original_shape[:2]), coeffs_slices[0])
+        coeffs_g = (decompressed_data[split_size:2 * split_size].reshape(original_shape[:2]), coeffs_slices[1])
+        coeffs_b = (decompressed_data[2 * split_size:].reshape(original_shape[:2]), coeffs_slices[2])
+
+        # Восстановление коэффициентов
+        r = pywt.waverec2(pywt.array_to_coeffs(*coeffs_r, output_format='wavedec2'), params['wavelet_type'])
+        g = pywt.waverec2(pywt.array_to_coeffs(*coeffs_g, output_format='wavedec2'), params['wavelet_type'])
+        b = pywt.waverec2(pywt.array_to_coeffs(*coeffs_b, output_format='wavedec2'), params['wavelet_type'])
+
+        restored = np.stack([r, g, b], axis=-1)
+        return np.clip(restored, 0, 255).astype(np.uint8)
+    except Exception as e:
+        raise ValueError(f"Ошибка при декомпрессии: {str(e)}")
+
+# === GUI для просмотра изображений ===
+class SvetlanaViewerApp(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.initUI()
+
+    def initUI(self):
+        self.setWindowTitle("Svetlana Image Viewer")
+        self.setGeometry(100, 100, 600, 600)
+        self.setStyleSheet("background-color: #333; color: white;")
+        self.label = QLabel("Выберите файл .svetlana для просмотра", self)
+        self.label.setAlignment(Qt.AlignCenter)
+        self.label.setStyleSheet("font-size: 16px; padding: 10px;")
+        self.button_select = QPushButton("Выбрать файл", self)
+        self.button_select.setStyleSheet("background-color: #555; color: white; font-size: 14px;")
+        self.button_select.clicked.connect(self.select_file)
+        self.layout = QVBoxLayout()
+        self.layout.addWidget(self.label)
+        self.layout.addWidget(self.button_select)
+        self.setLayout(self.layout)
+        self.file_path = None
+
+    def select_file(self):
+        file_path, _ = QFileDialog.getOpenFileName(self, "Выберите файл .svetlana", "", "Svetlana Format (*.svetlana)")
+        if file_path:
+            self.file_path = file_path
+            try:
+                # Загрузка и декомпрессия файла
+                compressed_data, coeffs_slices, shape, params = load_svetlana_file(file_path)
+                image = custom_decompression(compressed_data, coeffs_slices, shape, params)
+
+                # Преобразование изображения для отображения
+                height, width, channel = image.shape
+                bytes_per_line = 3 * width
+                q_image = QImage(image.data, width, height, bytes_per_line, QImage.Format_RGB888)
+                pixmap = QPixmap.fromImage(q_image)
+
+                # Отображение изображения
+                self.label.setPixmap(pixmap.scaled(500, 500, Qt.KeepAspectRatio))
+            except Exception as e:
+                self.label.setText(f"Ошибка: {str(e)}")
+
+# Запуск приложения
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = SvetlanaViewerApp()
+    window.show()
+    sys.exit(app.exec_())
