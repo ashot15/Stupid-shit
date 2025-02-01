@@ -1,132 +1,114 @@
 import os
 import subprocess
-from tkinter import *
+import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 
-# Настройка темного стиля
-def setup_dark_theme(root):
-    style = ttk.Style()
-    style.theme_use("clam")  # Используем тему "clam" для кастомизации
-    style.configure("TButton", background="#4CAF50", foreground="white", font=("Arial", 10, "bold"), padding=5)
-    style.map("TButton", background=[("active", "#45A049")])
-    style.configure("TLabel", background="#2E2E2E", foreground="white", font=("Arial", 10))
-    style.configure("TEntry", fieldbackground="#444", foreground="white", insertcolor="white")
-    style.configure("TFrame", background="#2E2E2E")
-    root.configure(bg="#2E2E2E")
+class CompilerApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Компилятор Python в EXE")
+        self.root.geometry("750x600")
+        self.setup_dark_theme()
 
-def compile_to_exe():
-    # Получаем путь к Python-файлу
-    python_file = python_file_path.get()
-    if not python_file or not os.path.isfile(python_file):
-        messagebox.showerror("Ошибка", "Выберите корректный Python-файл!")
-        return
-    root.attributes("-toolwindow", True)
-    # Получаем путь для выходной директории
-    output_dir = output_directory_path.get()
-    if not output_dir or not os.path.isdir(output_dir):
-        messagebox.showerror("Ошибка", "Укажите корректную выходную директорию!")
-        return
+        self.python_file_path = tk.StringVar()
+        self.output_directory_path = tk.StringVar()
 
-    # Формируем команду PyInstaller
-    command = [
-        "pyinstaller",
-        "--onefile",
-        "--noconsole",
-        f"--distpath={output_dir}"
-    ]
+        self.create_widgets()
 
-    # Добавляем внешние файлы
-    additional_files = additional_files_list.get(0, END)
-    for file in additional_files:
-        if os.path.isfile(file):
-            relative_path = os.path.basename(file)
-            command.append(f"--add-data={file};{relative_path}")
+    def setup_dark_theme(self):
+        style = ttk.Style()
+        style.theme_use("clam")
+        style.configure("TButton", background="#4CAF50", foreground="white", font=("Arial", 10, "bold"), padding=5)
+        style.map("TButton", background=[("active", "#45A049")])
+        style.configure("TLabel", background="#2E2E2E", foreground="white", font=("Arial", 10))
+        style.configure("TEntry", fieldbackground="#444", foreground="white", insertcolor="white")
+        style.configure("TFrame", background="#2E2E2E")
+        self.root.configure(bg="#2E2E2E")
 
-    # Добавляем путь к Python-файлу
-    command.append(python_file)
+    def create_widgets(self):
+        ttk.Label(self.root, text="Python файл:").grid(row=0, column=0, padx=10, pady=5, sticky=tk.W)
+        ttk.Entry(self.root, textvariable=self.python_file_path, width=50).grid(row=0, column=1, padx=10, pady=5)
+        ttk.Button(self.root, text="Обзор", command=self.browse_python_file, width=15).grid(row=0, column=2, padx=10, pady=5)
 
-    try:
-        # Запускаем процесс компиляции
-        process = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
-        )
-        while True:
-            output = process.stdout.readline()
-            if output == '' and process.poll() is not None:
-                break
-            if output:
-                print(output.strip())  # Выводим логи в консоль (можно заменить на Label)
+        ttk.Label(self.root, text="Выходная директория:").grid(row=1, column=0, padx=10, pady=5, sticky=tk.W)
+        ttk.Entry(self.root, textvariable=self.output_directory_path, width=50).grid(row=1, column=1, padx=10, pady=5)
+        ttk.Button(self.root, text="Обзор", command=self.browse_output_directory, width=15).grid(row=1, column=2, padx=10, pady=5)
+
+        ttk.Label(self.root, text="Внешние файлы:").grid(row=2, column=0, padx=10, pady=5, sticky=tk.W)
+        self.additional_files_list = tk.Listbox(self.root, width=50, height=5, bg="#444", fg="white", selectbackground="#4CAF50")
+        self.additional_files_list.grid(row=2, column=1, padx=10, pady=5)
+
+        frame_buttons = ttk.Frame(self.root)
+        frame_buttons.grid(row=2, column=2, padx=10, pady=5, sticky=tk.N)
+        ttk.Button(frame_buttons, text="Добавить", command=self.add_additional_file, width=15).pack(fill=tk.X, pady=2)
+        ttk.Button(frame_buttons, text="Удалить", command=self.remove_selected_file, width=15).pack(fill=tk.X, pady=2)
+        ttk.Button(frame_buttons, text="Очистить", command=self.clear_file_list, width=15).pack(fill=tk.X, pady=2)
+
+        self.log_box = tk.Text(self.root, height=6, width=80, bg="#222", fg="white")
+        self.log_box.grid(row=3, column=0, columnspan=3, padx=10, pady=5)
+
+        ttk.Button(self.root, text="Скомпилировать", command=self.compile_to_exe, width=20).grid(row=4, column=0, pady=10)
+        ttk.Button(self.root, text="Открыть папку с EXE", command=self.open_output_folder, width=20).grid(row=4, column=1, pady=10)
+        ttk.Button(self.root, text="Выход", command=self.root.quit, width=10).grid(row=4, column=2, pady=10)
+
+    def compile_to_exe(self):
+        python_file = self.python_file_path.get()
+        output_dir = self.output_directory_path.get()
+        if not python_file or not os.path.isfile(python_file):
+            messagebox.showerror("Ошибка", "Выберите корректный Python-файл!")
+            return
+        if not output_dir or not os.path.isdir(output_dir):
+            messagebox.showerror("Ошибка", "Укажите корректную выходную директорию!")
+            return
+
+        command = ["pyinstaller", "--onefile", "--noconsole", "--clean", "--noconfirm", f"--distpath={output_dir}", python_file]
+
+        additional_files = self.additional_files_list.get(0, tk.END)
+        for file in additional_files:
+            if os.path.isfile(file):
+                relative_path = os.path.basename(file)
+                command.append(f"--add-data={file};{relative_path}")
+
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.log_box.delete("1.0", tk.END)
+        for line in process.stdout:
+            self.log_box.insert(tk.END, line)
+            self.root.update()
         messagebox.showinfo("Успех", "Компиляция завершена успешно!")
-    except Exception as e:
-        messagebox.showerror("Ошибка", f"Произошла ошибка при компиляции: {e}")
 
-def browse_python_file():
-    file_path = filedialog.askopenfilename(
-        title="Выберите Python-файл",
-        filetypes=[("Python файлы", "*.py")]
-    )
-    if file_path:
-        python_file_path.set(file_path)
+    def open_output_folder(self):
+        output_dir = self.output_directory_path.get()
+        if os.path.isdir(output_dir):
+            os.startfile(output_dir)
+        else:
+            messagebox.showerror("Ошибка", "Выходная директория не найдена!")
 
-def browse_output_directory():
-    dir_path = filedialog.askdirectory(title="Выберите выходную директорию")
-    if dir_path:
-        output_directory_path.set(dir_path)
+    def browse_python_file(self):
+        file_path = filedialog.askopenfilename(title="Выберите Python-файл", filetypes=[("Python файлы", "*.py")])
+        if file_path:
+            self.python_file_path.set(file_path)
 
-def add_additional_file():
-    file_paths = filedialog.askopenfilenames(
-        title="Добавьте внешние файлы",
-        filetypes=[("Все файлы", "*.*")]
-    )
-    for file_path in file_paths:
-        additional_files_list.insert(END, file_path)
+    def browse_output_directory(self):
+        dir_path = filedialog.askdirectory(title="Выберите выходную директорию")
+        if dir_path:
+            self.output_directory_path.set(dir_path)
 
-def remove_selected_file():
-    selected_indices = additional_files_list.curselection()
-    for index in reversed(selected_indices):
-        additional_files_list.delete(index)
+    def add_additional_file(self):
+        file_paths = filedialog.askopenfilenames(title="Добавьте внешние файлы", filetypes=[("Все файлы", "*.*")])
+        for file_path in file_paths:
+            self.additional_files_list.insert(tk.END, file_path)
 
-# Создаем главное окно
-root = Tk()
-root.title("Компилятор Python в EXE")
-root.geometry("700x500")  # Увеличиваем размер окна
-setup_dark_theme(root)
+    def remove_selected_file(self):
+        selected_indices = self.additional_files_list.curselection()
+        for index in reversed(selected_indices):
+            self.additional_files_list.delete(index)
 
-# Переменные для хранения путей
-python_file_path = StringVar()
-output_directory_path = StringVar()
+    def clear_file_list(self):
+        self.additional_files_list.delete(0, tk.END)
 
-# Метка и поле для выбора Python-файла
-ttk.Label(root, text="Python файл:").grid(row=0, column=0, padx=10, pady=5, sticky=W)
-ttk.Entry(root, textvariable=python_file_path, width=60).grid(row=0, column=1, padx=10, pady=5)
-ttk.Button(root, text="Обзор", command=browse_python_file, width=10).grid(row=0, column=2, padx=10, pady=5)
 
-# Метка и поле для выбора выходной директории
-ttk.Label(root, text="Выходная директория:").grid(row=1, column=0, padx=10, pady=5, sticky=W)
-ttk.Entry(root, textvariable=output_directory_path, width=60).grid(row=1, column=1, padx=10, pady=5)
-ttk.Button(root, text="Обзор", command=browse_output_directory, width=10).grid(row=1, column=2, padx=10, pady=5)
-
-# Список для внешних файлов
-ttk.Label(root, text="Внешние файлы:").grid(row=2, column=0, padx=10, pady=5, sticky=NW)
-additional_files_list = Listbox(root, width=60, height=10, bg="#444", fg="white", selectbackground="#4CAF50")
-additional_files_list.grid(row=2, column=1, padx=10, pady=5, rowspan=3, columnspan=2)
-
-# Кнопки для управления внешними файлами
-ttk.Button(root, text="Добавить файл", command=add_additional_file, width=15).grid(row=3, column=0, padx=10, pady=5, sticky=S)
-ttk.Button(root, text="Удалить файл", command=remove_selected_file, width=15).grid(row=4, column=0, padx=10, pady=5, sticky=N)
-
-# Кнопка для запуска компиляции
-ttk.Button(
-    root,
-    text="Скомпилировать",
-    command=compile_to_exe,
-    style="TButton",
-    width=20
-).grid(row=5, column=0, columnspan=3, pady=20)
-
-# Запускаем главный цикл
-root.mainloop()
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = CompilerApp(root)
+    root.mainloop()
