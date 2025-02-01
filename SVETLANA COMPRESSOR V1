@@ -1,49 +1,32 @@
 import sys
 import numpy as np
 import pywt
-import zlib
+import lzma
 import cv2
 import pickle
 from PyQt5.QtWidgets import QApplication, QWidget, QPushButton, QLabel, QFileDialog, QVBoxLayout
 from PyQt5.QtGui import QPixmap, QImage
 from PyQt5.QtCore import Qt
 
-# === Улучшенный алгоритм сжатия ===
-def wavelet_transform(image):
+# === Функции сжатия ===
+def wavelet_transform(image, wavelet_type='haar', level=1):
     """Применяет дискретное вейвлет-преобразование к каждому цветовому каналу."""
-    coeffs_r = pywt.wavedec2(image[:, :, 0], 'haar', level=1)
-    coeffs_g = pywt.wavedec2(image[:, :, 1], 'haar', level=1)
-    coeffs_b = pywt.wavedec2(image[:, :, 2], 'haar', level=1)
+    coeffs_r = pywt.wavedec2(image[:, :, 0], wavelet_type, level=level)
+    coeffs_g = pywt.wavedec2(image[:, :, 1], wavelet_type, level=level)
+    coeffs_b = pywt.wavedec2(image[:, :, 2], wavelet_type, level=level)
     return (
         pywt.coeffs_to_array(coeffs_r),
         pywt.coeffs_to_array(coeffs_g),
         pywt.coeffs_to_array(coeffs_b)
     )
 
-def inverse_wavelet_transform(coeffs_r, coeffs_g, coeffs_b, shape):
-    """Восстанавливает изображение из вейвлет-коэффициентов."""
-    r = pywt.waverec2(pywt.array_to_coeffs(*coeffs_r, output_format='wavedec2'), 'haar')
-    g = pywt.waverec2(pywt.array_to_coeffs(*coeffs_g, output_format='wavedec2'), 'haar')
-    b = pywt.waverec2(pywt.array_to_coeffs(*coeffs_b, output_format='wavedec2'), 'haar')
-    restored = np.stack([r, g, b], axis=-1)
-    return np.clip(restored, 0, 255).astype(np.uint8)
+def custom_compression(image, wavelet_type='haar', level=1):
+    """Сжатие изображения с использованием LZMA."""
+    coeffs_r, coeffs_g, coeffs_b = wavelet_transform(image, wavelet_type, level)
+    compressed_data = lzma.compress(np.hstack((coeffs_r[0].flatten(), coeffs_g[0].flatten(), coeffs_b[0].flatten())).astype(np.float32), preset=9)
+    return compressed_data, (coeffs_r[1], coeffs_g[1], coeffs_b[1]), image.shape, {'wavelet_type': wavelet_type, 'level': level}
 
-def custom_compression(image):
-    """Сжатие изображения без потерь."""
-    coeffs_r, coeffs_g, coeffs_b = wavelet_transform(image)
-    compressed_data = zlib.compress(np.hstack((coeffs_r[0].flatten(), coeffs_g[0].flatten(), coeffs_b[0].flatten())).astype(np.float32).tobytes(), level=9)
-    return compressed_data, (coeffs_r[1], coeffs_g[1], coeffs_b[1]), image.shape
-
-def custom_decompression(compressed_data, coeffs_slices, original_shape):
-    """Восстановление изображения."""
-    decompressed_data = np.frombuffer(zlib.decompress(compressed_data), dtype=np.float32)
-    split_size = original_shape[0] * original_shape[1]
-    coeffs_r = (decompressed_data[:split_size].reshape(original_shape[:2]), coeffs_slices[0])
-    coeffs_g = (decompressed_data[split_size:2 * split_size].reshape(original_shape[:2]), coeffs_slices[1])
-    coeffs_b = (decompressed_data[2 * split_size:].reshape(original_shape[:2]), coeffs_slices[2])
-    return inverse_wavelet_transform(coeffs_r, coeffs_g, coeffs_b, original_shape)
-
-# === GUI ===
+# === GUI для сжатия изображений ===
 class ImageCompressorApp(QWidget):
     def __init__(self):
         super().__init__()
@@ -86,11 +69,11 @@ class ImageCompressorApp(QWidget):
             if image is None:
                 raise ValueError("Не удалось загрузить изображение.")
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)  # OpenCV загружает в BGR, переводим в RGB
-            compressed_data, coeffs_slices, shape = custom_compression(image)
+            compressed_data, coeffs_slices, shape, params = custom_compression(image, wavelet_type='haar', level=1)
             save_path, _ = QFileDialog.getSaveFileName(self, "Сохранить сжатый файл", "", "Svetlana Format (*.svetlana)")
             if save_path:
                 with open(save_path, 'wb') as f:
-                    pickle.dump((compressed_data, coeffs_slices, shape), f)
+                    pickle.dump((compressed_data, coeffs_slices, shape, params), f)
                 self.label.setText("Файл успешно сжат и сохранён!")
         except Exception as e:
             self.label.setText(f"Произошла ошибка: {str(e)}")
