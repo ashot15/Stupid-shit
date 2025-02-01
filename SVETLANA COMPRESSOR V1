@@ -7,26 +7,66 @@ import pickle
 from PyQt5.QtWidgets import QApplication, QWidget, QPushButton, QLabel, QFileDialog, QVBoxLayout
 from PyQt5.QtGui import QPixmap, QImage
 from PyQt5.QtCore import Qt
+import os
 
-# === Функции сжатия ===
-def wavelet_transform(image, wavelet_type='haar', level=1):
-    """Применяет дискретное вейвлет-преобразование к каждому цветовому каналу."""
+# === Оптимизированный алгоритм сжатия ===
+def custom_compression(image, wavelet_type='haar', level=1):
+    """Сжатие изображения с учетом размера."""
+    height, width = image.shape[:2]
+    min_size = 32
+    if height <= min_size or width <= min_size:
+        compressed_data = lzma.compress(image.tobytes(), preset=9)
+        return compressed_data, None, image.shape, {'wavelet_used': False}
+    if height < min_size or width < min_size:
+        original_shape = image.shape
+        image = cv2.resize(image, (min_size, min_size))
+    else:
+        original_shape = image.shape
     coeffs_r = pywt.wavedec2(image[:, :, 0], wavelet_type, level=level)
     coeffs_g = pywt.wavedec2(image[:, :, 1], wavelet_type, level=level)
     coeffs_b = pywt.wavedec2(image[:, :, 2], wavelet_type, level=level)
-    return (
-        pywt.coeffs_to_array(coeffs_r),
-        pywt.coeffs_to_array(coeffs_g),
-        pywt.coeffs_to_array(coeffs_b)
-    )
+    coeffs_r_array, _ = pywt.coeffs_to_array(coeffs_r)
+    coeffs_g_array, _ = pywt.coeffs_to_array(coeffs_g)
+    coeffs_b_array, _ = pywt.coeffs_to_array(coeffs_b)
+    quantization_factor = max(5, int(min(height, width) / 10))
+    coeffs_r_quantized = np.round(coeffs_r_array / quantization_factor) * quantization_factor
+    coeffs_g_quantized = np.round(coeffs_g_array / quantization_factor) * quantization_factor
+    coeffs_b_quantized = np.round(coeffs_b_array / quantization_factor) * quantization_factor
+    compressed_data = lzma.compress(np.hstack((coeffs_r_quantized.flatten(),
+                                               coeffs_g_quantized.flatten(),
+                                               coeffs_b_quantized.flatten())).astype(np.float32), preset=9)
+    return compressed_data, (_, _, _), original_shape, {
+        'wavelet_used': True,
+        'wavelet_type': wavelet_type,
+        'level': level,
+        'quantization_factor': quantization_factor,
+        'original_shape': original_shape
+    }
 
-def custom_compression(image, wavelet_type='haar', level=1):
-    """Сжатие изображения с использованием LZMA."""
-    coeffs_r, coeffs_g, coeffs_b = wavelet_transform(image, wavelet_type, level)
-    compressed_data = lzma.compress(np.hstack((coeffs_r[0].flatten(), coeffs_g[0].flatten(), coeffs_b[0].flatten())).astype(np.float32), preset=9)
-    return compressed_data, (coeffs_r[1], coeffs_g[1], coeffs_b[1]), image.shape, {'wavelet_type': wavelet_type, 'level': level}
+# === Декомпрессия ===
+def custom_decompression(compressed_data, coeffs_slices, original_shape, params):
+    try:
+        if not params['wavelet_used']:
+            image_bytes = lzma.decompress(compressed_data)
+            restored_image = np.frombuffer(image_bytes, dtype=np.uint8).reshape(original_shape)
+            return restored_image
+        decompressed_data = np.frombuffer(lzma.decompress(compressed_data), dtype=np.float32)
+        split_size = original_shape[0] * original_shape[1]
+        coeffs_r = (decompressed_data[:split_size].reshape(original_shape[:2]), coeffs_slices[0])
+        coeffs_g = (decompressed_data[split_size:2 * split_size].reshape(original_shape[:2]), coeffs_slices[1])
+        coeffs_b = (decompressed_data[2 * split_size:].reshape(original_shape[:2]), coeffs_slices[2])
+        r = pywt.waverec2(pywt.array_to_coeffs(*coeffs_r, output_format='wavedec2'), params['wavelet_type'])
+        g = pywt.waverec2(pywt.array_to_coeffs(*coeffs_g, output_format='wavedec2'), params['wavelet_type'])
+        b = pywt.waverec2(pywt.array_to_coeffs(*coeffs_b, output_format='wavedec2'), params['wavelet_type'])
+        restored = np.stack([r, g, b], axis=-1)
+        if tuple(original_shape) != restored.shape:
+            restored = cv2.resize(restored, (params['original_shape'][1], params['original_shape'][0]))
+        return np.clip(restored, 0, 255).astype(np.uint8)
+    except Exception as e:
+        print(f"Ошибка при декомпрессии: {e}")
+        return None
 
-# === GUI для сжатия изображений ===
+# === GUI ===
 class ImageCompressorApp(QWidget):
     def __init__(self):
         super().__init__()
@@ -34,7 +74,7 @@ class ImageCompressorApp(QWidget):
 
     def initUI(self):
         self.setWindowTitle("Svetlana Image Compressor")
-        self.setGeometry(100, 100, 500, 500)
+        self.setGeometry(100, 100, 600, 400)
         self.setStyleSheet("background-color: #333; color: white;")
         self.label = QLabel("Выберите изображение для сжатия", self)
         self.label.setAlignment(Qt.AlignCenter)
@@ -68,7 +108,7 @@ class ImageCompressorApp(QWidget):
             image = cv2.imread(self.image_path)
             if image is None:
                 raise ValueError("Не удалось загрузить изображение.")
-            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)  # OpenCV загружает в BGR, переводим в RGB
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             compressed_data, coeffs_slices, shape, params = custom_compression(image, wavelet_type='haar', level=1)
             save_path, _ = QFileDialog.getSaveFileName(self, "Сохранить сжатый файл", "", "Svetlana Format (*.svetlana)")
             if save_path:
@@ -76,7 +116,7 @@ class ImageCompressorApp(QWidget):
                     pickle.dump((compressed_data, coeffs_slices, shape, params), f)
                 self.label.setText("Файл успешно сжат и сохранён!")
         except Exception as e:
-            self.label.setText(f"Произошла ошибка: {str(e)}")
+            self.label.setText(f"Ошибка: {str(e)}")
 
 # Запуск приложения
 if __name__ == "__main__":
