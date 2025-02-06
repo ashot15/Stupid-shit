@@ -1,5 +1,6 @@
 import os
 import subprocess
+import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
@@ -8,13 +9,12 @@ class CompilerApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Компилятор Python в EXE")
-        self.root.geometry("750x600")
+        self.root.geometry("800x600")
         self.setup_dark_theme()
-
         self.python_file_path = tk.StringVar()
         self.output_directory_path = tk.StringVar()
-
         self.create_widgets()
+        self.check_pyinstaller()
 
     def setup_dark_theme(self):
         style = ttk.Style()
@@ -29,14 +29,17 @@ class CompilerApp:
     def create_widgets(self):
         ttk.Label(self.root, text="Python файл:").grid(row=0, column=0, padx=10, pady=5, sticky=tk.W)
         ttk.Entry(self.root, textvariable=self.python_file_path, width=50).grid(row=0, column=1, padx=10, pady=5)
-        ttk.Button(self.root, text="Обзор", command=self.browse_python_file, width=15).grid(row=0, column=2, padx=10, pady=5)
+        ttk.Button(self.root, text="Обзор", command=self.browse_python_file, width=15).grid(row=0, column=2, padx=10,
+                                                                                            pady=5)
 
         ttk.Label(self.root, text="Выходная директория:").grid(row=1, column=0, padx=10, pady=5, sticky=tk.W)
         ttk.Entry(self.root, textvariable=self.output_directory_path, width=50).grid(row=1, column=1, padx=10, pady=5)
-        ttk.Button(self.root, text="Обзор", command=self.browse_output_directory, width=15).grid(row=1, column=2, padx=10, pady=5)
+        ttk.Button(self.root, text="Обзор", command=self.browse_output_directory, width=15).grid(row=1, column=2,
+                                                                                                 padx=10, pady=5)
 
         ttk.Label(self.root, text="Внешние файлы:").grid(row=2, column=0, padx=10, pady=5, sticky=tk.W)
-        self.additional_files_list = tk.Listbox(self.root, width=50, height=5, bg="#444", fg="white", selectbackground="#4CAF50")
+        self.additional_files_list = tk.Listbox(self.root, width=50, height=10, bg="#444", fg="white",
+                                                selectbackground="#4CAF50")
         self.additional_files_list.grid(row=2, column=1, padx=10, pady=5)
 
         frame_buttons = ttk.Frame(self.root)
@@ -45,12 +48,25 @@ class CompilerApp:
         ttk.Button(frame_buttons, text="Удалить", command=self.remove_selected_file, width=15).pack(fill=tk.X, pady=2)
         ttk.Button(frame_buttons, text="Очистить", command=self.clear_file_list, width=15).pack(fill=tk.X, pady=2)
 
-        self.log_box = tk.Text(self.root, height=6, width=80, bg="#222", fg="white")
+        self.log_box = tk.Text(self.root, height=10, width=80, bg="#222", fg="white")
         self.log_box.grid(row=3, column=0, columnspan=3, padx=10, pady=5)
 
-        ttk.Button(self.root, text="Скомпилировать", command=self.compile_to_exe, width=20).grid(row=4, column=0, pady=10)
-        ttk.Button(self.root, text="Открыть папку с EXE", command=self.open_output_folder, width=20).grid(row=4, column=1, pady=10)
+        ttk.Button(self.root, text="Скомпилировать", command=self.compile_to_exe, width=20).grid(row=4, column=0,
+                                                                                                 pady=10)
+        ttk.Button(self.root, text="Открыть папку с EXE", command=self.open_output_folder, width=20).grid(row=4,
+                                                                                                          column=1,
+                                                                                                          pady=10)
         ttk.Button(self.root, text="Выход", command=self.root.quit, width=10).grid(row=4, column=2, pady=10)
+
+    def check_pyinstaller(self):
+        try:
+            subprocess.run(["pyinstaller", "--version"], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        except FileNotFoundError:
+            messagebox.showerror("Ошибка", "PyInstaller не найден. Пожалуйста, установите его и добавьте в PATH.")
+            self.root.quit()
+        except subprocess.CalledProcessError as e:
+            messagebox.showerror("Ошибка", f"Ошибка при проверке PyInstaller: {e.stderr.decode().strip()}")
+            self.root.quit()
 
     def compile_to_exe(self):
         python_file = self.python_file_path.get()
@@ -62,7 +78,10 @@ class CompilerApp:
             messagebox.showerror("Ошибка", "Укажите корректную выходную директорию!")
             return
 
-        command = ["pyinstaller", "--onefile", "--noconsole", "--clean", "--noconfirm", f"--distpath={output_dir}", python_file]
+        command = [
+            "pyinstaller", "--onefile", "--noconsole", "--clean", "--noconfirm",
+            f"--distpath={output_dir}", python_file
+        ]
 
         additional_files = self.additional_files_list.get(0, tk.END)
         for file in additional_files:
@@ -70,12 +89,39 @@ class CompilerApp:
                 relative_path = os.path.basename(file)
                 command.append(f"--add-data={file};{relative_path}")
 
-        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         self.log_box.delete("1.0", tk.END)
-        for line in process.stdout:
-            self.log_box.insert(tk.END, line)
-            self.root.update()
-        messagebox.showinfo("Успех", "Компиляция завершена успешно!")
+        self.compile_thread = threading.Thread(target=self.run_compile, args=(command,))
+        self.compile_thread.start()
+        self.root.after(100, self.check_compile_status)
+
+    def run_compile(self, command):
+        self.process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.stdout_lines = []
+        self.stderr_lines = []
+        while True:
+            output = self.process.stdout.readline()
+            if output == '' and self.process.poll() is not None:
+                break
+            if output:
+                self.stdout_lines.append(output)
+        while True:
+            error = self.process.stderr.readline()
+            if error == '' and self.process.poll() is not None:
+                break
+            if error:
+                self.stderr_lines.append(error)
+        self.process.wait()
+
+    def check_compile_status(self):
+        if self.compile_thread.is_alive():
+            self.root.after(100, self.check_compile_status)
+        else:
+            self.log_box.insert(tk.END, "".join(self.stdout_lines))
+            self.log_box.insert(tk.END, "".join(self.stderr_lines))
+            if self.process.returncode == 0:
+                messagebox.showinfo("Успех", "Компиляция завершена успешно!")
+            else:
+                messagebox.showerror("Ошибка", "Произошла ошибка при компиляции. Проверьте лог.")
 
     def open_output_folder(self):
         output_dir = self.output_directory_path.get()
